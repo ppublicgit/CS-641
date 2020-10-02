@@ -41,9 +41,9 @@ def split_indices(alist, train=0.25, validate=0.25, test=0.5, **kwargs):
     return copylist[:train_stop], copylist[train_stop:validate_stop], copylist[validate_stop:]
 
 
-def get_train_val_test_df(df, train=0.25, validate=0.25, test=0.5, **kwargs):
-    if "drop_cols" in kwargs:
-        df = df.drop(columns=kwargs["drop_cols"])
+def get_train_val_test_df(df, train=0.25, validate=0.25, test=0.5, drop_cols=None, **kwargs):
+    if drop_cols is not None:
+        df = df.drop(columns=drop_cols)
 
     train = []
     validate = []
@@ -104,14 +104,17 @@ def get_split_error(conf_mat):
     ir_er = 1 - conf_mat[1,1]/(conf_mat[0,1]+conf_mat[1,1])
     return rf_er, ir_er
 
-if __name__ == "__main__":
+
+def main(county=None, drop_cols=None):
+
     df = pd.read_csv(os.path.join(os.getcwd(), "data", "cleaned_data", "all_data.csv"), index_col=0)
 
     df.reset_index(inplace=True)
 
-    train_df, validate_df, test_df = get_train_val_test_df(df, 0.25, 0.25, 0.5)#, drop_cols=["Latitude", "Longitude"])
+    df = df.drop(columns=["index"])
 
-    county = None
+    train_df, validate_df, test_df = get_train_val_test_df(df, 0.25, 0.25, 0.5, drop_cols=drop_cols)
+
     X_train, y_train = extract_in_out(train_df, county)
     X_validate, y_validate = extract_in_out(validate_df, county)
     X_test, y_test = extract_in_out(test_df, county)
@@ -129,6 +132,7 @@ if __name__ == "__main__":
 
     train_entropy_errors = []
     val_entropy_errors = []
+    test_entropy_errors = []
     num_entropy_nodes = []
     for md in max_depth:
         clf_entropy_tree = DecisionTreeClassifier(criterion='entropy', max_depth=md, random_state=1)
@@ -136,20 +140,7 @@ if __name__ == "__main__":
         num_entropy_nodes.append(clf_entropy_tree.tree_.node_count)
         train_entropy_errors.append(1-clf_entropy_tree.score(X_train, y_train))
         val_entropy_errors.append(1-clf_entropy_tree.score(X_validate, y_validate))
-
-    #train_my_errors = []
-    #val_my_errors = []
-    #test_my_errors = []
-    #num_my_nodes = []
-    #features = np.array(train_df.drop(columns=["rf_irr", "county"]).columns).reshape(len(train_df.columns)-2, 1)
-    ##features = list(train_df.drop(columns=["rf_irr", "county"]).columns)
-    #for md in max_depth:
-    #    print(md)
-    #    decision_tree = dtree.dtree(X_train, y_train.flatten(), features, outtype="classification", treeType="CART", maxlevel=md)
-    #    num_my_nodes.append(decision_tree.get_n_leaves())
-    #    train_my_errors.append(1-decision_tree.score(X_train, y_train.flatten()))
-    #    val_my_errors.append(1-decision_tree.score(X_validate, y_validate.flatten()))
-    #    test_my_errors.append(1-decision_tree.score(X_test, y_test.flatten()))
+        test_entropy_errors.append(1-clf_entropy_tree.score(X_test, y_test))
 
     if county is None:
         title = "Madison, Houston, Limestone"
@@ -158,6 +149,9 @@ if __name__ == "__main__":
     else:
         title = county[0] + ", " + county[1]
 
+    if drop_cols is not None:
+        title += f"\nDropped Cols {drop_cols}"
+
     fig, axes = plt.subplots(2,2, squeeze=False)
     fig.suptitle(title)
     axes[0,0].set_title("Error vs Max Depth")
@@ -165,6 +159,7 @@ if __name__ == "__main__":
     axes[0,0].plot(max_depth, val_gini_errors, label="val_gini")
     axes[0,0].plot(max_depth, train_entropy_errors, label="train_entropy")
     axes[0,0].plot(max_depth, val_entropy_errors, label="val_entropy")
+    axes[0,0].plot(max_depth, test_entropy_errors, label="test_entropy")
     axes[0,0].legend()
     axes[0,0].grid(True)
     axes[0,0].set_xlabel("Max Depth")
@@ -174,6 +169,7 @@ if __name__ == "__main__":
     axes[1,0].plot(num_gini_nodes, val_gini_errors, label="val_gini")
     axes[1,0].plot(num_entropy_nodes, train_entropy_errors, label="train_entropy")
     axes[1,0].plot(num_entropy_nodes, val_entropy_errors, label="val_entropy")
+    axes[1,0].plot(num_entropy_nodes, test_entropy_errors, label="test_entropy")
     axes[1,0].grid(True)
     axes[1,0].legend()
     axes[1,0].set_xlabel("Num Nodes")
@@ -182,8 +178,10 @@ if __name__ == "__main__":
 
     train_gini_predictions = []
     val_gini_predictions = []
+    test_gini_predictions = []
     split_train_error = []
     split_val_error = []
+    split_test_error = []
     num_gini_nodes = []
     for i, md in enumerate(max_depth):
         clf_gini_tree = DecisionTreeClassifier(criterion='gini', max_depth=md, random_state=1)
@@ -191,31 +189,38 @@ if __name__ == "__main__":
         num_gini_nodes.append(clf_gini_tree.tree_.node_count)
         train_gini_predictions.append(clf_gini_tree.predict(X_train))
         val_gini_predictions.append(clf_gini_tree.predict(X_validate))
+        test_gini_predictions.append(clf_gini_tree.predict(X_test))
 
         train_conf_mat = calc_conf_mat(train_gini_predictions[i], y_train)
         val_conf_mat = calc_conf_mat(val_gini_predictions[i], y_validate)
+        test_conf_mat = calc_conf_mat(test_gini_predictions[i], y_test)
 
         split_train_error.append(get_split_error(train_conf_mat))
         split_val_error.append(get_split_error(val_conf_mat))
+        split_test_error.append(get_split_error(test_conf_mat))
 
         print(f"========= Max-Depth {md} =========")
         print_conf_mat(train_conf_mat)
         print("")
         print_conf_mat(val_conf_mat)
 
-    rf_tr_error, ir_tr_error, rf_vl_error, ir_vl_error = [], [] ,[] ,[]
+    rf_tr_error, ir_tr_error, rf_vl_error, ir_vl_error, rf_te_error, ir_te_error = [], [] ,[] ,[], [], []
 
     for i in range(len(split_train_error)):
         rf_tr_error.append(split_train_error[i][0])
         ir_tr_error.append(split_train_error[i][1])
         rf_vl_error.append(split_val_error[i][0])
         ir_vl_error.append(split_val_error[i][1])
+        rf_te_error.append(split_test_error[i][0])
+        ir_te_error.append(split_test_error[i][1])
 
     axes[0,1].set_title("Rainfed/Irrigated Prediction Error vs Max Depth")
     axes[0,1].plot(max_depth, rf_tr_error, label="rainfed_train")
     axes[0,1].plot(max_depth, ir_tr_error, label="irrigated_train")
     axes[0,1].plot(max_depth, rf_vl_error, label="rainfed_val")
     axes[0,1].plot(max_depth, ir_vl_error, label="irrigated_val")
+    axes[0,1].plot(max_depth, rf_te_error, label="rainfed_test")
+    axes[0,1].plot(max_depth, ir_te_error, label="irrigated_test")
     axes[0,1].legend()
     axes[0,1].grid(True)
     axes[0,1].set_xlabel("Max Depth")
@@ -225,11 +230,20 @@ if __name__ == "__main__":
     axes[1,1].plot(num_gini_nodes, ir_tr_error, label="irrigated_train")
     axes[1,1].plot(num_gini_nodes, rf_vl_error, label="rainfed_val")
     axes[1,1].plot(num_gini_nodes, ir_vl_error, label="irrigated_val")
+    axes[1,1].plot(num_gini_nodes, rf_te_error, label="rainfed_test")
+    axes[1,1].plot(num_gini_nodes, ir_te_error, label="irrigated_test")
     axes[1,1].legend()
     axes[1,1].set_xlabel("Num Nodes")
     axes[1,1].set_ylabel("Error Rate")
     axes[1,1].grid(True)
 
-
     plt.show(block=False)
+
+
+if __name__ == "__main__":
+    counties = [None, "Madison", "Limestone", "Houston", ["Madison", "Limestone"]]
+    drop_cols = [None, ["Longitude"], ["Latitude", "Longitude"]]
+    for county in counties:
+        for dc in drop_cols:
+            main(county, dc)
     input("Enter to exit...")
